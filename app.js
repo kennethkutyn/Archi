@@ -23,8 +23,6 @@ const categories = {
             { id: 'web-app', name: 'Web App', icon: 'web' },
             { id: 'mobile-app', name: 'Mobile App', icon: 'mobile' },
             { id: 'website', name: 'Website', icon: 'globe' },
-            { id: 'landing-pages', name: 'Landing Pages', icon: 'landing' },
-            { id: 'checkout', name: 'Checkout', icon: 'checkout' },
             { id: 'onboarding', name: 'Onboarding', icon: 'onboarding' }
         ]
     },
@@ -36,9 +34,7 @@ const categories = {
             { id: 'segment', name: 'Segment', icon: 'segment' },
             { id: 'api', name: 'HTTP API', icon: 'api' },
             { id: 'cdp', name: 'CDP', icon: 'cdp' },
-            { id: 'crm', name: 'CRM', icon: 'crm' },
-            { id: 'data-warehouse', name: 'Data Warehouse', icon: 'warehouse' }
-        ]
+            { id: 'crm', name: 'CRM', icon: 'crm' }        ]
     },
     analysis: {
         name: 'Analysis / Warehouse',
@@ -47,7 +43,6 @@ const categories = {
             { id: 'amplitude-analytics', name: 'Amplitude Analytics', icon: 'amplitude' },
             { id: 'snowflake', name: 'Snowflake', icon: 'snowflake' },
             { id: 'bigquery', name: 'BigQuery', icon: 'bigquery' },
-            { id: 'redshift', name: 'Redshift', icon: 'redshift' },
             { id: 'databricks', name: 'Databricks', icon: 'databricks' },
             { id: 'looker', name: 'Looker', icon: 'looker' }
         ]
@@ -65,6 +60,13 @@ const categories = {
         ]
     }
 };
+
+const itemCategoryIndex = {};
+Object.entries(categories).forEach(([categoryKey, categoryDef]) => {
+    categoryDef.items.forEach(item => {
+        itemCategoryIndex[item.id] = categoryKey;
+    });
+});
 
 // Icon SVG templates
 const icons = {
@@ -222,11 +224,47 @@ const icons = {
     </svg>`,
     'intercom': `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+    </svg>`,
+    
+    // Custom entry icon
+    'custom': `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+        <line x1="12" y1="8" x2="12" y2="16"/>
+        <line x1="8" y1="12" x2="16" y2="12"/>
     </svg>`
 };
 
+// Connection model definitions
+const connectionModels = {
+    'amplitude-to-warehouse': {
+        name: 'Amplitude → Warehouse',
+        rules: [
+            { from: { category: 'marketing' }, to: { category: 'experiences' } },
+            { from: { category: 'experiences' }, to: { ids: ['amplitude-sdk'] } },
+            { from: { ids: ['amplitude-sdk'] }, to: { ids: ['amplitude-analytics'] } },
+            { from: { ids: ['amplitude-analytics'] }, to: { ids: ['bigquery', 'databricks', 'snowflake'] } },
+            { from: { ids: ['amplitude-analytics'] }, to: { category: 'activation' } }
+        ]
+    },
+    'warehouse-to-amplitude': {
+        name: 'Warehouse → Amplitude',
+        rules: []
+    },
+    'cdp-in-the-middle': {
+        name: 'CDP in the Middle',
+        rules: []
+    },
+    'amplitude-as-activation': {
+        name: 'Amplitude as Activation',
+        rules: []
+    }
+};
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
 // Track active category
 let activeCategory = 'marketing';
+let activeModel = 'amplitude-to-warehouse';
 
 // Track which items have been added per layer
 const addedItems = {
@@ -237,11 +275,78 @@ const addedItems = {
     activation: new Set()
 };
 
+// Track custom entries per category
+const customEntries = {
+    marketing: [],
+    experiences: [],
+    sources: [],
+    analysis: [],
+    activation: []
+};
+
+// Counter for unique custom entry IDs
+let customEntryCounter = 0;
+
 // Initialize the application
 document.addEventListener('DOMContentLoaded', () => {
     initCategoryPicker();
+    initCustomEntryInput();
+    initModelPicker();
     renderComponentList(activeCategory);
+    renderConnections();
+    window.addEventListener('resize', handleResize);
 });
+
+// Initialize custom entry input
+function initCustomEntryInput() {
+    const input = document.getElementById('custom-entry-input');
+    const addBtn = document.getElementById('add-custom-btn');
+    
+    // Add on button click
+    addBtn.addEventListener('click', () => {
+        addCustomEntry();
+    });
+    
+    // Add on Enter key
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            addCustomEntry();
+        }
+    });
+}
+
+// Add a custom entry to the current category
+function addCustomEntry() {
+    const input = document.getElementById('custom-entry-input');
+    const name = input.value.trim();
+    
+    if (!name) return;
+    
+    // Generate unique ID
+    const id = `custom-${activeCategory}-${++customEntryCounter}`;
+    
+    // Create custom entry
+    const entry = {
+        id: id,
+        name: name,
+        icon: 'custom',
+        isCustom: true
+    };
+    
+    // Add to custom entries for this category
+    customEntries[activeCategory].push(entry);
+    itemCategoryIndex[id] = activeCategory;
+    
+    // Clear input
+    input.value = '';
+    
+    // Re-render the list to show the new entry
+    renderComponentList(activeCategory);
+    
+    // Scroll to bottom of list to show new entry
+    const list = document.getElementById('component-list');
+    list.scrollTop = list.scrollHeight;
+}
 
 // Initialize category picker
 function initCategoryPicker() {
@@ -252,6 +357,29 @@ function initCategoryPicker() {
             const category = tab.dataset.category;
             switchCategory(category);
         });
+    });
+}
+
+// Initialize model picker
+function initModelPicker() {
+    const modelButtons = document.querySelectorAll('.model-option');
+    modelButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            const modelId = button.dataset.model;
+            if (modelId && modelId !== activeModel) {
+                activeModel = modelId;
+                updateModelPickerState();
+                renderConnections();
+            }
+        });
+    });
+    updateModelPickerState();
+}
+
+function updateModelPickerState() {
+    const modelButtons = document.querySelectorAll('.model-option');
+    modelButtons.forEach(button => {
+        button.classList.toggle('active', button.dataset.model === activeModel);
     });
 }
 
@@ -276,32 +404,49 @@ function renderComponentList(category) {
     list.innerHTML = '';
     list.dataset.category = category;
     
+    // Render built-in items
     categoryData.items.forEach(item => {
-        const li = document.createElement('li');
-        li.className = 'component-item';
-        li.dataset.id = item.id;
-        li.dataset.category = category;
-        
-        // Check if already added
-        if (addedItems[category].has(item.id)) {
-            li.classList.add('added');
-        }
-        
-        const iconHtml = icons[item.icon] || icons['amplitude'];
-        
-        li.innerHTML = `
-            <div class="component-icon category-${category}">
-                ${iconHtml}
-            </div>
-            <span class="component-name">${item.name}</span>
-        `;
-        
-        li.addEventListener('click', () => {
-            addItemToLayer(item.id, item.name, item.icon, category);
-        });
-        
+        const li = createComponentListItem(item, category, false);
         list.appendChild(li);
     });
+    
+    // Render custom entries for this category
+    customEntries[category].forEach(item => {
+        const li = createComponentListItem(item, category, true);
+        list.appendChild(li);
+    });
+}
+
+// Create a component list item
+function createComponentListItem(item, category, isCustom) {
+    const li = document.createElement('li');
+    li.className = 'component-item';
+    li.dataset.id = item.id;
+    li.dataset.category = category;
+    
+    if (isCustom) {
+        li.classList.add('custom-entry');
+    }
+    
+    // Check if already added
+    if (addedItems[category].has(item.id)) {
+        li.classList.add('added');
+    }
+    
+    const iconHtml = isCustom ? icons['custom'] : (icons[item.icon] || icons['amplitude']);
+    
+    li.innerHTML = `
+        <div class="component-icon category-${category}">
+            ${iconHtml}
+        </div>
+        <span class="component-name">${item.name}</span>
+    `;
+    
+    li.addEventListener('click', () => {
+        addItemToLayer(item.id, item.name, isCustom ? 'custom' : item.icon, category);
+    });
+    
+    return li;
 }
 
 // Add an item to its corresponding layer
@@ -337,6 +482,7 @@ function addItemToLayer(itemId, itemName, iconKey, category) {
     
     // Update sidebar item state
     updateSidebarItemState(itemId, category, true);
+    renderConnections();
 }
 
 // Create a diagram node element
@@ -377,6 +523,7 @@ function removeItemFromLayer(itemId, category, node) {
         node.remove();
         addedItems[category].delete(itemId);
         updateSidebarItemState(itemId, category, false);
+        renderConnections();
     });
 }
 
@@ -389,4 +536,303 @@ function updateSidebarItemState(itemId, category, isAdded) {
     if (sidebarItem) {
         sidebarItem.classList.toggle('added', isAdded);
     }
+}
+
+function updateLayerSpacing(model) {
+    const categoriesWithConnections = new Set();
+    model.rules.forEach(rule => {
+        gatherCategoriesFromSelector(rule.from, categoriesWithConnections);
+        gatherCategoriesFromSelector(rule.to, categoriesWithConnections);
+    });
+    
+    document.querySelectorAll('.layer').forEach(layer => {
+        const category = layer.dataset.layer;
+        const content = layer.querySelector('.layer-content');
+        if (!content) return;
+        const nodeCount = content.querySelectorAll('.diagram-node').length;
+        const shouldSpread = nodeCount >= 2 && categoriesWithConnections.has(category);
+        content.classList.toggle('layer-content--spread', shouldSpread);
+    });
+}
+
+function gatherCategoriesFromSelector(selector = {}, set) {
+    if (!selector) return;
+    if (selector.category) {
+        set.add(selector.category);
+    }
+    if (selector.ids) {
+        selector.ids.forEach(id => {
+            if (itemCategoryIndex[id]) {
+                set.add(itemCategoryIndex[id]);
+            }
+        });
+    }
+}
+
+// ---- Connection rendering ----
+
+function renderConnections() {
+    const canvas = document.querySelector('.canvas');
+    const model = connectionModels[activeModel];
+    if (!canvas || !model) return;
+
+    updateLayerSpacing(model);
+    
+    const svg = ensureConnectionLayer();
+    if (!svg) return;
+    
+    const canvasRect = canvas.getBoundingClientRect();
+    svg.setAttribute('width', canvasRect.width);
+    svg.setAttribute('height', canvasRect.height);
+    svg.setAttribute('viewBox', `0 0 ${canvasRect.width} ${canvasRect.height}`);
+    svg.innerHTML = '';
+    
+    svg.appendChild(createArrowMarker());
+    
+    model.rules.forEach(rule => {
+        const sources = resolveSelectorNodes(rule.from);
+        const targets = resolveSelectorNodes(rule.to);
+        
+        sources.forEach(sourceNode => {
+            targets.forEach(targetNode => {
+                if (sourceNode === targetNode) return;
+                const path = buildConnectorPath(sourceNode, targetNode, canvasRect);
+                if (path) {
+                    svg.appendChild(path);
+                }
+            });
+        });
+    });
+
+    renderPaidAdsAdditionalConnection(svg, canvasRect);
+}
+
+function ensureConnectionLayer() {
+    const canvas = document.querySelector('.canvas');
+    if (!canvas) return null;
+    let svg = document.getElementById('connection-layer');
+    if (!svg) {
+        svg = document.createElementNS(SVG_NS, 'svg');
+        svg.setAttribute('id', 'connection-layer');
+        svg.classList.add('connection-layer');
+        canvas.appendChild(svg);
+    }
+    return svg;
+}
+
+function createArrowMarker() {
+    const defs = document.createElementNS(SVG_NS, 'defs');
+    const marker = document.createElementNS(SVG_NS, 'marker');
+    marker.setAttribute('id', 'connection-arrow');
+    marker.setAttribute('orient', 'auto');
+    marker.setAttribute('markerWidth', '6.4');
+    marker.setAttribute('markerHeight', '6.4');
+    marker.setAttribute('refX', '4.8');
+    marker.setAttribute('refY', '2.4');
+    marker.setAttribute('markerUnits', 'strokeWidth');
+    
+    const arrowPath = document.createElementNS(SVG_NS, 'path');
+    arrowPath.setAttribute('d', 'M0,0 L4.8,2.4 L0,4.8 Z');
+    arrowPath.setAttribute('fill', 'rgba(30, 97, 220, 0.65)');
+    marker.appendChild(arrowPath);
+    defs.appendChild(marker);
+    return defs;
+}
+
+function resolveSelectorNodes(selector = {}) {
+    let nodes = Array.from(document.querySelectorAll('.diagram-node'));
+    if (selector.category) {
+        nodes = nodes.filter(node => node.dataset.category === selector.category);
+    }
+    if (selector.ids) {
+        nodes = nodes.filter(node => selector.ids.includes(node.dataset.id));
+    }
+    return nodes;
+}
+
+function renderPaidAdsAdditionalConnection(svg, canvasRect) {
+    const paidAdsNode = document.querySelector('.diagram-node[data-id="paid-ads"]');
+    const amplitudeAnalyticsNode = document.querySelector('.diagram-node[data-id="amplitude-analytics"]');
+    if (!paidAdsNode || !amplitudeAnalyticsNode) return;
+
+    const marketingLayer = document.querySelector('.layer[data-layer="marketing"]');
+    const analysisLayer = document.querySelector('.layer[data-layer="analysis"]');
+    if (!marketingLayer || !analysisLayer) return;
+
+    const paidRect = paidAdsNode.getBoundingClientRect();
+    const amplitudeRect = amplitudeAnalyticsNode.getBoundingClientRect();
+    const marketingRect = marketingLayer.getBoundingClientRect();
+
+    const start = {
+        x: paidRect.left - canvasRect.left,
+        y: paidRect.top + paidRect.height / 2 - canvasRect.top
+    };
+    const leftBoundary = marketingRect.left - canvasRect.left - 32;
+    const travelX = Math.max(24, leftBoundary);
+    const end = {
+        x: amplitudeRect.left - canvasRect.left,
+        y: amplitudeRect.top + amplitudeRect.height / 2 - canvasRect.top
+    };
+
+    const points = [
+        start,
+        { x: travelX, y: start.y },
+        { x: travelX, y: end.y },
+        end
+    ];
+
+    const pathData = createRoundedPath(points, 17);
+    if (!pathData) return;
+
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', pathData);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'rgba(30, 97, 220, 0.65)');
+    path.setAttribute('stroke-width', '2.5');
+    path.setAttribute('stroke-linejoin', 'round');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('marker-end', 'url(#connection-arrow)');
+    svg.appendChild(path);
+}
+
+function buildConnectorPath(sourceNode, targetNode, canvasRect) {
+    const sourceRect = sourceNode.getBoundingClientRect();
+    const targetRect = targetNode.getBoundingClientRect();
+    const points = calculateConnectorPoints(sourceNode, targetNode, sourceRect, targetRect, canvasRect);
+    if (!points || points.length < 2) return null;
+    
+    const pathData = createRoundedPath(points, 17);
+    if (!pathData) return null;
+    
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', pathData);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'rgba(30, 97, 220, 0.65)');
+    path.setAttribute('stroke-width', '2.5');
+    path.setAttribute('stroke-linejoin', 'round');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('marker-end', 'url(#connection-arrow)');
+    return path;
+}
+
+function calculateConnectorPoints(sourceNode, targetNode, sourceRect, targetRect, canvasRect) {
+    if (!sourceRect || !targetRect) return null;
+    const verticalGap = targetRect.top - sourceRect.bottom;
+    const reverseVerticalGap = sourceRect.top - targetRect.bottom;
+    const tolerance = 8;
+    
+    if (verticalGap > tolerance) {
+        // source above target
+        const start = {
+            x: sourceRect.left + sourceRect.width / 2 - canvasRect.left,
+            y: sourceRect.bottom - canvasRect.top
+        };
+        const end = {
+            x: targetRect.left + targetRect.width / 2 - canvasRect.left,
+            y: targetRect.top - canvasRect.top
+        };
+        const gapCenter = getLayerGapCenter(sourceNode, targetNode, canvasRect);
+        const midY = gapCenter ?? (start.y + end.y) / 2;
+        return [
+            start,
+            { x: start.x, y: midY },
+            { x: end.x, y: midY },
+            end
+        ];
+    }
+    
+    if (reverseVerticalGap > tolerance) {
+        // target above source
+        const start = {
+            x: sourceRect.left + sourceRect.width / 2 - canvasRect.left,
+            y: sourceRect.top - canvasRect.top
+        };
+        const end = {
+            x: targetRect.left + targetRect.width / 2 - canvasRect.left,
+            y: targetRect.bottom - canvasRect.top
+        };
+        const gapCenter = getLayerGapCenter(targetNode, sourceNode, canvasRect);
+        const midY = gapCenter ?? (start.y + end.y) / 2;
+        return [
+            start,
+            { x: start.x, y: midY },
+            { x: end.x, y: midY },
+            end
+        ];
+    }
+    
+    // Default to horizontal routing
+    const start = {
+        x: sourceRect.right - canvasRect.left,
+        y: sourceRect.top + sourceRect.height / 2 - canvasRect.top
+    };
+    const end = {
+        x: targetRect.left - canvasRect.left,
+        y: targetRect.top + targetRect.height / 2 - canvasRect.top
+    };
+    const midX = (start.x + end.x) / 2;
+    return [
+        start,
+        { x: midX, y: start.y },
+        { x: midX, y: end.y },
+        end
+    ];
+}
+
+function createRoundedPath(points, radius = 24) {
+    if (points.length < 2) return '';
+    let d = `M ${points[0].x} ${points[0].y}`;
+    
+    for (let i = 1; i < points.length; i++) {
+        const current = points[i];
+        const prev = points[i - 1];
+        const next = points[i + 1];
+        
+        if (!next) {
+            d += ` L ${current.x} ${current.y}`;
+            break;
+        }
+        
+        const prevDist = distanceBetween(prev, current);
+        const nextDist = distanceBetween(next, current);
+        const r = Math.min(radius, prevDist / 2, nextDist / 2);
+        const before = movePointTowards(current, prev, r);
+        const after = movePointTowards(current, next, r);
+        
+        d += ` L ${before.x} ${before.y}`;
+        d += ` Q ${current.x} ${current.y} ${after.x} ${after.y}`;
+    }
+    
+    return d;
+}
+
+function movePointTowards(start, target, distance) {
+    const dx = target.x - start.x;
+    const dy = target.y - start.y;
+    const len = Math.hypot(dx, dy) || 1;
+    return {
+        x: start.x + (dx / len) * distance,
+        y: start.y + (dy / len) * distance
+    };
+}
+
+function distanceBetween(a, b) {
+    return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function getLayerGapCenter(upperNode, lowerNode, canvasRect) {
+    const upperLayerRect = getLayerRect(upperNode);
+    const lowerLayerRect = getLayerRect(lowerNode);
+    if (!upperLayerRect || !lowerLayerRect) return null;
+    if (upperLayerRect.bottom > lowerLayerRect.top) return null;
+    return (upperLayerRect.bottom + lowerLayerRect.top) / 2 - canvasRect.top;
+}
+
+function getLayerRect(node) {
+    const layer = node.closest('.layer');
+    return layer ? layer.getBoundingClientRect() : null;
+}
+
+function handleResize() {
+    renderConnections();
 }
