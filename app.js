@@ -280,6 +280,15 @@ const icons = {
     'segment-mark': `<img src="https://cdn.prod.website-files.com/60a4d4a53dd0c3f45579ac64/60ccab91521f5d2546df4610_5e8db5423d0e429ff92af6d4_segment-logo-FCBB33F58E-seeklogo.com.png" alt="Segment logo" width="20" height="20" style="display:block;" />`
 };
 
+const amplitudeSdkBadgeOptions = [
+    { id: 'analytics', label: 'An' },
+    { id: 'experiment', label: 'Exp' },
+    { id: 'guides-surveys', label: 'G&S' },
+    { id: 'session-replay', label: 'SR' }
+];
+
+const amplitudeSdkSelectedBadges = new Set();
+
 // Connection model definitions
 const cdpLikeSourceIds = ['cdp', 'segment'];
 const primaryWarehouseNodeIds = ['bigquery', 'databricks', 'snowflake'];
@@ -709,6 +718,10 @@ function createDiagramNode(itemId, itemName, iconKey, category) {
             </svg>
         </button>
     `;
+
+    if (itemId === 'amplitude-sdk') {
+        attachAmplitudeSdkBadges(node);
+    }
     
     // Add remove handler
     const removeBtn = node.querySelector('.node-remove');
@@ -734,6 +747,48 @@ function createDiagramNode(itemId, itemName, iconKey, category) {
     node.addEventListener('dragend', handleDragEnd);
     
     return node;
+}
+
+function attachAmplitudeSdkBadges(node) {
+    const badgesWrapper = document.createElement('div');
+    badgesWrapper.className = 'node-badges';
+
+    amplitudeSdkBadgeOptions.forEach(({ id, label }) => {
+        const badgeButton = document.createElement('button');
+        badgeButton.type = 'button';
+        badgeButton.className = 'node-badge';
+        badgeButton.dataset.badgeId = id;
+        badgeButton.textContent = label;
+        badgeButton.setAttribute('aria-label', `${label} badge`);
+        badgeButton.addEventListener('click', (event) => {
+            event.stopPropagation();
+            toggleAmplitudeSdkBadge(node, id);
+        });
+        badgesWrapper.appendChild(badgeButton);
+    });
+
+    node.appendChild(badgesWrapper);
+    syncAmplitudeSdkBadgeState(node);
+}
+
+function toggleAmplitudeSdkBadge(node, badgeId) {
+    if (amplitudeSdkSelectedBadges.has(badgeId)) {
+        amplitudeSdkSelectedBadges.delete(badgeId);
+    } else {
+        amplitudeSdkSelectedBadges.add(badgeId);
+    }
+    syncAmplitudeSdkBadgeState(node);
+}
+
+function syncAmplitudeSdkBadgeState(node) {
+    const hasActiveBadges = amplitudeSdkSelectedBadges.size > 0;
+    node.classList.toggle('has-active-badges', hasActiveBadges);
+    node.querySelectorAll('.node-badge').forEach(badge => {
+        const badgeId = badge.dataset.badgeId;
+        const isActive = amplitudeSdkSelectedBadges.has(badgeId);
+        badge.classList.toggle('active', isActive);
+        badge.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
 }
 
 // Remove an item from its layer
@@ -1295,12 +1350,12 @@ function buildActivationToMarketingPath(sourceNode, targetNode, canvasRect) {
     const canvasRight = Math.min(canvasRect.width - canvasEdgeMargin, desiredRight);
     const tierClearance = 32;
     const topClearance = 28;
-    const bottomClearance = 28;
     const topMargin = marketingLayerRect
         ? Math.max(12, marketingLayerRect.top - canvasRect.top - topClearance)
         : 32;
     const canvasBottomLimit = canvasRect.height - 24;
     const nodeClearanceY = Math.min(canvasBottomLimit, start.y + Math.max(18, sourceRect.height * 0.3));
+    const extraHorizontalClearance = 0;
     let activationExitY;
     if (activationLayerRect) {
         const layerBottomY = activationLayerRect.bottom - canvasRect.top;
@@ -1309,7 +1364,7 @@ function buildActivationToMarketingPath(sourceNode, targetNode, canvasRect) {
         activationExitY = Math.min(canvasBottomLimit, nodeClearanceY + tierClearance);
     }
     activationExitY = Math.max(activationExitY, nodeClearanceY + 8);
-    const horizontalTravelY = Math.min(canvasBottomLimit, activationExitY + bottomClearance);
+    const horizontalTravelY = Math.min(canvasBottomLimit, activationExitY + extraHorizontalClearance);
 
     const points = [start];
     if (Math.abs(nodeClearanceY - start.y) > 0.5) {
