@@ -43,6 +43,9 @@
     --canvas-padding: 40px;
     --layer-gap: 16px;
     --layer-min-height: 120px;
+    --model-picker-gap: 20px;
+    --model-picker-height: 72px;
+    --model-picker-space: calc(var(--model-picker-gap) + var(--model-picker-height));
     
     /* Shadows */
     --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
@@ -369,8 +372,8 @@ body {
     padding: clamp(12px, 2vw, var(--canvas-padding));
     overflow: auto;
     min-height: 0;
-    max-height: 100vh;
-    height: 100vh;
+    max-height: calc(100vh - var(--model-picker-space));
+    height: calc(100vh - var(--model-picker-space));
     position: relative;
 }
 
@@ -795,6 +798,8 @@ body {
 
     .canvas-container {
         padding: 16px;
+        height: auto;
+        max-height: none;
     }
 
     .canvas {

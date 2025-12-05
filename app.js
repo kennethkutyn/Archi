@@ -52,6 +52,7 @@ const categories = {
             { id: 'segment', name: 'Segment', icon: 'segment-mark' },
             { id: 'api', name: 'HTTP API', icon: 'api' },
             { id: 'cdp', name: 'CDP', icon: 'cdp' },
+            { id: 'etl', name: 'ETL', icon: 'etl' },
             { id: 'crm', name: 'CRM', icon: 'crm' }        ]
     },
     analysis: {
@@ -187,6 +188,14 @@ const icons = {
         <polyline points="16 18 22 12 16 6"/>
         <polyline points="8 6 2 12 8 18"/>
     </svg>`,
+    'etl': `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="6" height="6" rx="1"/>
+        <rect x="15" y="3" width="6" height="6" rx="1"/>
+        <rect x="3" y="15" width="6" height="6" rx="1"/>
+        <path d="M6 9v6"/>
+        <path d="M9 6h6"/>
+        <path d="M15 12v6"/>
+    </svg>`,
     'cdp': `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <ellipse cx="12" cy="5" rx="9" ry="3"/>
         <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
@@ -285,6 +294,7 @@ const globalConnectionRules = [
         ]
     },
     { from: { category: 'experiences' }, to: { ids: ['amplitude-sdk'] } },
+    { from: { category: 'experiences' }, to: { ids: ['etl'] } },
     { from: { category: 'experiences' }, to: { ids: cdpLikeSourceIds } },
     { from: { ids: ['amplitude-sdk'] }, to: { ids: ['amplitude-analytics'] } },
     {
@@ -307,24 +317,41 @@ const connectionModels = {
     },
     'warehouse-to-amplitude': {
         name: 'Warehouse → Amplitude',
-        rules: []
+        rules: [
+            { from: { ids: ['snowflake'] }, to: { ids: ['amplitude-analytics'] } },
+            { from: { ids: ['etl'] }, to: { ids: ['snowflake'] } }
+        ],
+        suppress: [
+            { from: { ids: ['amplitude-analytics'] }, to: { ids: ['snowflake'] } }
+        ]
     },
     'cdp-in-the-middle': {
         name: 'CDP in the Middle',
         rules: []
     },
-    'amplitude-as-activation': {
-        name: 'Amplitude as Activation',
-        rules: []
-    }
 };
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const CONNECTION_COLOR = 'rgba(100, 116, 139, 0.75)';
 
+const modelAutoConfig = {
+    'amplitude-to-warehouse': {
+        add: ['amplitude-analytics', 'snowflake', 'amplitude-sdk', 'mobile-app', 'web-app'],
+        remove: ['cdp', 'segment', 'etl']
+    },
+    'warehouse-to-amplitude': {
+        add: ['amplitude-analytics', 'snowflake', 'mobile-app', 'etl', 'web-app'],
+        remove: ['cdp', 'segment', 'amplitude-sdk']
+    },
+    'cdp-in-the-middle': {
+        add: ['cdp', 'mobile-app', 'web-app', 'amplitude-analytics'],
+        remove: ['amplitude-sdk', 'etl']
+    }
+};
+
 // Track active category
 let activeCategory = 'marketing';
-let activeModel = 'amplitude-to-warehouse';
+let activeModel = null;
 
 // Track which items have been added per layer
 const addedItems = {
@@ -410,6 +437,19 @@ function addCustomEntry() {
     list.scrollTop = list.scrollHeight;
 }
 
+function getItemDefinition(itemId) {
+    if (!itemId) return null;
+    const category = itemCategoryIndex[itemId];
+    if (!category) return null;
+    const categoryData = categories[category];
+    let item = categoryData?.items?.find(entry => entry.id === itemId);
+    if (!item) {
+        item = customEntries[category]?.find(entry => entry.id === itemId);
+    }
+    if (!item) return null;
+    return { ...item, category };
+}
+
 // Initialize category picker
 function initCategoryPicker() {
     const tabs = document.querySelectorAll('.category-tab');
@@ -428,11 +468,14 @@ function initModelPicker() {
     modelButtons.forEach(button => {
         button.addEventListener('click', () => {
             const modelId = button.dataset.model;
-            if (modelId && modelId !== activeModel) {
+            if (!modelId) return;
+            const wasActive = modelId === activeModel;
+            if (!wasActive) {
                 activeModel = modelId;
                 updateModelPickerState();
                 renderConnections();
             }
+            applyModelAutoAdjustments(modelId);
         });
     });
     updateModelPickerState();
@@ -615,6 +658,29 @@ function addItemToLayer(itemId, itemName, iconKey, category) {
     // Update sidebar item state
     updateSidebarItemState(itemId, category, true);
     renderConnections();
+}
+
+function ensureItemAdded(itemId) {
+    const definition = getItemDefinition(itemId);
+    if (!definition) return;
+    const { id, name, icon, category } = definition;
+    if (addedItems[category]?.has(id)) return;
+    addItemToLayer(id, name, icon, category);
+}
+
+function removeItemById(itemId) {
+    const node = document.querySelector(`.diagram-node[data-id="${itemId}"]`);
+    if (!node) return;
+    const category = node.dataset.category || itemCategoryIndex[itemId];
+    if (!category) return;
+    removeItemFromLayer(itemId, category, node);
+}
+
+function applyModelAutoAdjustments(modelId) {
+    const config = modelAutoConfig[modelId];
+    if (!config) return;
+    (config.add || []).forEach(ensureItemAdded);
+    (config.remove || []).forEach(removeItemById);
 }
 
 // Create a diagram node element
@@ -993,20 +1059,25 @@ function buildSameTierConnectorPath(sourceNode, targetNode, canvasRect) {
 
 function renderConnections() {
     const canvas = document.querySelector('.canvas');
-    const model = connectionModels[activeModel];
-    if (!canvas || !model) return;
+    if (!canvas) return;
+    const model = activeModel ? connectionModels[activeModel] : null;
 
     const combinedRuleDescriptors = [
-        ...globalConnectionRules.map((rule, idx) => ({ rule, tag: `global-${idx}` })),
-        ...(model.rules || []).map((rule, idx) => ({ rule, tag: `model-${activeModel}-${idx}` }))
+        ...globalConnectionRules.map((rule, idx) => ({ rule, tag: `global-${idx}` }))
     ];
-    const combinedRules = combinedRuleDescriptors.map(descriptor => descriptor.rule);
+    if (model?.rules?.length) {
+        combinedRuleDescriptors.push(
+            ...model.rules.map((rule, idx) => ({ rule, tag: `model-${activeModel}-${idx}` }))
+        );
+    }
 
     updateLayerSpacing();
     
     const svg = ensureConnectionLayer();
     if (!svg) return;
     
+    const suppressors = model?.suppress || [];
+
     const canvasRect = canvas.getBoundingClientRect();
     svg.setAttribute('width', canvasRect.width);
     svg.setAttribute('height', canvasRect.height);
@@ -1024,6 +1095,7 @@ function renderConnections() {
         sources.forEach(sourceNode => {
             targets.forEach(targetNode => {
                 if (sourceNode === targetNode) return;
+                if (shouldSuppressConnection(sourceNode, targetNode, suppressors)) return;
                 if (shouldSkipConnection(rule, sourceNode, targetNode)) return;
                 const key = buildConnectionKey(sourceNode, targetNode, `rule-${tag}`);
                 if (dismissedConnections.has(key)) return;
@@ -1111,6 +1183,29 @@ function resolveSelectorNodes(selector = {}) {
     return nodes;
 }
 
+function nodeMatchesSelector(node, selector = {}) {
+    if (!node) return false;
+    if (!selector || (!selector.category && !selector.ids?.length)) {
+        return true;
+    }
+    if (selector.category && node.dataset.category !== selector.category) {
+        return false;
+    }
+    if (selector.ids && selector.ids.length && !selector.ids.includes(node.dataset.id)) {
+        return false;
+    }
+    return true;
+}
+
+function shouldSuppressConnection(sourceNode, targetNode, suppressors = []) {
+    if (!suppressors.length) return false;
+    return suppressors.some(condition => {
+        const fromMatch = !condition.from || nodeMatchesSelector(sourceNode, condition.from);
+        const toMatch = !condition.to || nodeMatchesSelector(targetNode, condition.to);
+        return fromMatch && toMatch;
+    });
+}
+
 function shouldSkipConnection(rule, sourceNode, targetNode) {
     if (!rule?.exclusions?.length) return false;
     return rule.exclusions.some(exclusion => {
@@ -1181,6 +1276,8 @@ function renderPaidAdsAdditionalConnection(svg, canvasRect) {
 function buildActivationToMarketingPath(sourceNode, targetNode, canvasRect) {
     const sourceRect = sourceNode.getBoundingClientRect();
     const targetRect = targetNode.getBoundingClientRect();
+    const activationLayerRect = getLayerRect(sourceNode);
+    const marketingLayerRect = getLayerRect(targetNode);
     const start = {
         x: sourceRect.left + sourceRect.width / 2 - canvasRect.left,
         y: sourceRect.bottom - canvasRect.top
@@ -1189,18 +1286,44 @@ function buildActivationToMarketingPath(sourceNode, targetNode, canvasRect) {
         x: targetRect.left + targetRect.width / 2 - canvasRect.left,
         y: targetRect.top - canvasRect.top
     };
-    const canvasRight = Math.max(canvasRect.width - 24, start.x + 24);
-    const topMargin = 24;
-    const offsetDown = Math.min(32, canvasRect.height - start.y - 24);
+    const layerRightBoundary = activationLayerRect
+        ? activationLayerRect.right - canvasRect.left
+        : sourceRect.right - canvasRect.left;
+    const rightOffset = 32;
+    const canvasEdgeMargin = 12;
+    const desiredRight = Math.max(start.x + rightOffset, layerRightBoundary + rightOffset);
+    const canvasRight = Math.min(canvasRect.width - canvasEdgeMargin, desiredRight);
+    const tierClearance = 32;
+    const topClearance = 28;
+    const bottomClearance = 28;
+    const topMargin = marketingLayerRect
+        ? Math.max(12, marketingLayerRect.top - canvasRect.top - topClearance)
+        : 32;
+    const canvasBottomLimit = canvasRect.height - 24;
+    const nodeClearanceY = Math.min(canvasBottomLimit, start.y + Math.max(18, sourceRect.height * 0.3));
+    let activationExitY;
+    if (activationLayerRect) {
+        const layerBottomY = activationLayerRect.bottom - canvasRect.top;
+        activationExitY = Math.min(canvasBottomLimit, layerBottomY + tierClearance);
+    } else {
+        activationExitY = Math.min(canvasBottomLimit, nodeClearanceY + tierClearance);
+    }
+    activationExitY = Math.max(activationExitY, nodeClearanceY + 8);
+    const horizontalTravelY = Math.min(canvasBottomLimit, activationExitY + bottomClearance);
 
-    const points = [
-        start,
-        { x: start.x, y: start.y + offsetDown },
-        { x: canvasRight, y: start.y + offsetDown },
+    const points = [start];
+    if (Math.abs(nodeClearanceY - start.y) > 0.5) {
+        points.push({ x: start.x, y: nodeClearanceY });
+    }
+    if (Math.abs(horizontalTravelY - nodeClearanceY) > 0.5) {
+        points.push({ x: start.x, y: horizontalTravelY });
+    }
+    points.push(
+        { x: canvasRight, y: horizontalTravelY },
         { x: canvasRight, y: topMargin },
         { x: targetTop.x, y: topMargin },
         targetTop
-    ];
+    );
 
     const pathData = createRoundedPath(points, 17);
     if (!pathData) return null;
